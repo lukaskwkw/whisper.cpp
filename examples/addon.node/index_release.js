@@ -1,7 +1,7 @@
 const path = require("path");
 const { whisper } = require(path.join(
   __dirname,
-  "../../build/bin/Release/whisper-addon.node"
+  "./whisper-addon.node"
 ));
 const { promisify } = require("util");
 const fs = require("fs");
@@ -10,7 +10,7 @@ const whisperAsync = promisify(whisper);
 console.log('whisperAsync =', whisperAsync);
 // console.log('process =', process);
 
-const fname_inp = "../../samples/jfk.wav";
+const fname_inp = "../../../samples/jfk.wav";
 // load fname_inp to ArrayBuffer
 const buffer = fs.readFileSync(fname_inp);
 const arrayBuffer = buffer.buffer.slice(
@@ -20,11 +20,12 @@ const arrayBuffer = buffer.buffer.slice(
 
 const whisperParams = {
   language: "en",
-  model: path.join(__dirname, "../../models/ggml-base.en.bin"),
+  model: path.join(__dirname, "../../../models/ggml-base.en.bin"),
   fname_inp: "dupa",
   use_gpu: true,
   n_threads: 4,
   array_buffer: arrayBuffer,
+  // dll_location: path.join(__dirname, './cuda/whisper.dll'),
   dll_location: path.join(__dirname, './cuda/whisper.dll'),
   // dll_location: 'whisper_cuda.dll',
 };
