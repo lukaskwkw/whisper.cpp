@@ -25,6 +25,7 @@ const whisperParams = {
   array_buffer: arrayBuffer,
   // dll_location: path.join(__dirname, './cuda/whisper.dll'),
   dll_location: 'whisper.dll',
+  no_timestamps: false
 };
 
 const arguments = process.argv.slice(2);

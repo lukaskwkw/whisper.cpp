@@ -309,7 +309,9 @@ int run(whisper_params &params, std::vector<std::vector<std::string>> &result)
 
         wparams.initial_prompt = params.prompt.c_str();
 
-        whisper_print_user_data user_data = {&params, &pcmf32s};
+        wparams.no_timestamps    = params.no_timestamps;
+
+        whisper_print_user_data user_data = { &params, &pcmf32s };
 
         // this callback is called on each new segment
         if (!wparams.print_realtime)
@@ -411,6 +413,7 @@ Napi::Value whisper(const Napi::CallbackInfo &info)
     std::string model = whisper_params.Get("model").As<Napi::String>();
     std::string input = whisper_params.Get("fname_inp").As<Napi::String>();
     bool use_gpu = whisper_params.Get("use_gpu").As<Napi::Boolean>();
+    bool no_timestamps = whisper_params.Get("no_timestamps").As<Napi::Boolean>();
 
     std::string dll_location = whisper_params.Get("dll_location").As<Napi::String>();
     Napi::ArrayBuffer arrayBuffer = whisper_params.Get("array_buffer").As<Napi::ArrayBuffer>();
@@ -426,6 +429,8 @@ Napi::Value whisper(const Napi::CallbackInfo &info)
     params.n_threads = n_threads;
     params.buffer = buffer;
     params.dll_location = dll_location;
+    params.no_timestamps = no_timestamps;
+
 
     Napi::Function callback = info[1].As<Napi::Function>();
     Worker *worker = new Worker(callback, params);
