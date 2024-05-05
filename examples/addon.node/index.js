@@ -1,7 +1,7 @@
 const path = require("path");
 const { whisper } = require(path.join(
   __dirname,
-  "../../build/bin/Release/whisper-addon.node"
+  "../../build/bin/Release/addon.node.node"
 ));
 const { promisify } = require("util");
 const fs = require("fs");
@@ -23,8 +23,10 @@ const whisperParams = {
   use_gpu: true,
   n_threads: 4,
   array_buffer: arrayBuffer,
-  // dll_location: path.join(__dirname, './cuda/whisper.dll'),
-  dll_location: 'whisper.dll',
+  dll_location: path.join(__dirname,
+    "../../build/bin/Release/whisper.dll"
+  ),
+  // dll_location: 'whisper.dll',
   no_timestamps: false
 };
 
