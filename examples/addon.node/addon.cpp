@@ -222,9 +222,9 @@ int run(whisper_params &params, std::vector<std::vector<std::string>> &result)
         whisper_log_set(cb_log_disable, NULL);
     }
 
-    if (params.fname_inp.empty() && params.pcmf32.empty())
+    if (params.fname_inp.empty() && params.pcmf32.empty() && params.buffer.empty())
     {
-        fprintf(stderr, "error: no input files or audio buffer specified\n");
+        fprintf(stderr, "error: no input files or audio buffers specified\n");
         return 2;
     }
 
@@ -247,115 +247,146 @@ int run(whisper_params &params, std::vector<std::vector<std::string>> &result)
         return 3;
     }
 
-    // whisper_ctx_init_openvino_encoder(ctx, nullptr, params.openvino_encode_device.c_str(), nullptr);
+    whisper_ctx_init_openvino_encoder(ctx, nullptr, params.openvino_encode_device.c_str(), nullptr);
 
-    std::vector<float> pcmf32;               // mono-channel F32 PCM
-    std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
+    // std::vector<float> pcmf32;               // mono-channel F32 PCM
+    // std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
 
     // if params.pcmf32 is provided, set params.fname_inp to "buffer"
     // this is simpler than further modifications in the code
-    // if (!params.pcmf32.empty())
-    // {
-    //     fprintf(stderr, "info: using audio buffer as input\n");
-    //     params.fname_inp.clear();
-    //     params.fname_inp.emplace_back("buffer");
-    // }
 
-    if (!::read_wav_from_buffer(params.buffer, pcmf32, pcmf32s, params.diarize))
+    if (!params.buffer.empty())
     {
-        fprintf(stderr, "error: failed to read audio from buffer\n");
-        // continue;
+        fprintf(stderr, "info: using audio vector buffer as input\n");
+        params.fname_inp.clear();
+        params.fname_inp.emplace_back("buffer");
     }
 
-    // print system information
-    if (!params.no_prints)
+    if (!params.pcmf32.empty())
     {
-        fprintf(stderr, "\n");
-        fprintf(stderr, "system_info: n_threads = %d / %d | %s\n",
-                params.n_threads * params.n_processors, std::thread::hardware_concurrency(), whisper_print_system_info());
+        fprintf(stderr, "info: using audio buffer as input\n");
+        params.fname_inp.clear();
+        params.fname_inp.emplace_back("buffer");
     }
 
-    // print some info about the processing
-    if (!params.no_prints)
+    for (int f = 0; f < (int)params.fname_inp.size(); ++f)
     {
-        fprintf(stderr, "\n");
-        if (!whisper_is_multilingual(ctx))
+        const auto fname_inp = params.fname_inp[f];
+        const auto fname_out = f < (int)params.fname_out.size() && !params.fname_out[f].empty() ? params.fname_out[f] : params.fname_inp[f];
+
+        std::vector<float> pcmf32;               // mono-channel F32 PCM
+        std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
+
+        // read the input audio file if params.pcmf32 is not provided
+        if (params.pcmf32.empty() && params.buffer.empty())
         {
-            if (params.language != "en" || params.translate)
+            if (!::read_wav(fname_inp, pcmf32, pcmf32s, params.diarize))
             {
-                params.language = "en";
-                params.translate = false;
-                fprintf(stderr, "%s: WARNING: model is not multilingual, ignoring language and translation options\n", __func__);
+                fprintf(stderr, "error: failed to read WAV file '%s'\n", fname_inp.c_str());
+                continue;
             }
         }
-        fprintf(stderr, "%s: processing  (%d samples, %.1f sec), %d threads, %d processors, lang = %s, task = %s, timestamps = %d ...\n",
-                __func__, int(pcmf32.size()), float(pcmf32.size()) / WHISPER_SAMPLE_RATE,
-                params.n_threads, params.n_processors,
-                params.language.c_str(),
-                params.translate ? "translate" : "transcribe",
-                params.no_timestamps ? 0 : 1);
-
-        fprintf(stderr, "\n");
-    }
-
-    // run the inference
-    {
-        whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-
-        wparams.strategy = params.beam_size > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
-
-        wparams.print_realtime = false;
-        wparams.print_progress = params.print_progress;
-        wparams.print_timestamps = !params.no_timestamps;
-        wparams.print_special = params.print_special;
-        wparams.translate = params.translate;
-        wparams.language = params.language.c_str();
-        wparams.n_threads = params.n_threads;
-        wparams.n_max_text_ctx = params.max_context >= 0 ? params.max_context : wparams.n_max_text_ctx;
-        wparams.offset_ms = params.offset_t_ms;
-        wparams.duration_ms = params.duration_ms;
-
-        wparams.token_timestamps = params.output_wts || params.max_len > 0;
-        wparams.thold_pt = params.word_thold;
-        wparams.entropy_thold = params.entropy_thold;
-        wparams.logprob_thold = params.logprob_thold;
-        wparams.max_len = params.output_wts && params.max_len == 0 ? 60 : params.max_len;
-        wparams.audio_ctx = params.audio_ctx;
-
-        wparams.greedy.best_of = params.best_of;
-        wparams.beam_search.beam_size = params.beam_size;
-
-        wparams.initial_prompt = params.prompt.c_str();
-
-        wparams.no_timestamps = params.no_timestamps;
-
-        whisper_print_user_data user_data = {&params, &pcmf32s};
-
-        // this callback is called on each new segment
-        if (!wparams.print_realtime)
+        else if (!params.pcmf32.empty())
         {
-            wparams.new_segment_callback = whisper_print_segment_callback;
-            wparams.new_segment_callback_user_data = &user_data;
+            pcmf32 = params.pcmf32;
         }
-
-        // example for abort mechanism
-        // in this example, we do not abort the processing, but we could if the flag is set to true
-        // the callback is called before every encoder run - if it returns false, the processing is aborted
+        else if (!params.buffer.empty())
         {
-            static bool is_aborted = false; // NOTE: this should be atomic to avoid data race
-
-            wparams.encoder_begin_callback = [](struct whisper_context * /*ctx*/, struct whisper_state * /*state*/, void *user_data)
+            if (!::read_wav_from_buffer(params.buffer, pcmf32, pcmf32s, params.diarize))
             {
-                bool is_aborted = *(bool *)user_data;
-                return !is_aborted;
-            };
-            wparams.encoder_begin_callback_user_data = &is_aborted;
+                fprintf(stderr, "error: failed to read audio from buffer\n");
+            }
+        }
+        // print system information
+        if (!params.no_prints)
+        {
+            fprintf(stderr, "\n");
+            fprintf(stderr, "system_info: n_threads = %d / %d | %s\n",
+                    params.n_threads * params.n_processors, std::thread::hardware_concurrency(), whisper_print_system_info());
         }
 
-        if (whisper_full_parallel(ctx, wparams, pcmf32.data(), pcmf32.size(), params.n_processors) != 0)
+        // print some info about the processing
+        if (!params.no_prints)
         {
-            fprintf(stderr, "failed to process audio\n");
-            return 10;
+            fprintf(stderr, "\n");
+            if (!whisper_is_multilingual(ctx))
+            {
+                if (params.language != "en" || params.translate)
+                {
+                    params.language = "en";
+                    params.translate = false;
+                    fprintf(stderr, "%s: WARNING: model is not multilingual, ignoring language and translation options\n", __func__);
+                }
+            }
+            fprintf(stderr, "%s: processing  (%d samples, %.1f sec), %d threads, %d processors, lang = %s, task = %s, timestamps = %d ...\n",
+                    __func__, int(pcmf32.size()), float(pcmf32.size()) / WHISPER_SAMPLE_RATE,
+                    params.n_threads, params.n_processors,
+                    params.language.c_str(),
+                    params.translate ? "translate" : "transcribe",
+                    params.no_timestamps ? 0 : 1);
+
+            fprintf(stderr, "\n");
+        }
+
+        // run the inference
+        {
+            whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+
+            wparams.strategy = params.beam_size > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
+
+            wparams.print_realtime = false;
+            wparams.print_progress = params.print_progress;
+            wparams.print_timestamps = !params.no_timestamps;
+            wparams.print_special = params.print_special;
+            wparams.translate = params.translate;
+            wparams.language = params.language.c_str();
+            wparams.n_threads = params.n_threads;
+            wparams.n_max_text_ctx = params.max_context >= 0 ? params.max_context : wparams.n_max_text_ctx;
+            wparams.offset_ms = params.offset_t_ms;
+            wparams.duration_ms = params.duration_ms;
+
+            wparams.token_timestamps = params.output_wts || params.max_len > 0;
+            wparams.thold_pt = params.word_thold;
+            wparams.entropy_thold = params.entropy_thold;
+            wparams.logprob_thold = params.logprob_thold;
+            wparams.max_len = params.output_wts && params.max_len == 0 ? 60 : params.max_len;
+            wparams.audio_ctx = params.audio_ctx;
+
+            wparams.greedy.best_of = params.best_of;
+            wparams.beam_search.beam_size = params.beam_size;
+
+            wparams.initial_prompt = params.prompt.c_str();
+
+            wparams.no_timestamps = params.no_timestamps;
+
+            whisper_print_user_data user_data = {&params, &pcmf32s};
+
+            // this callback is called on each new segment
+            if (!wparams.print_realtime)
+            {
+                wparams.new_segment_callback = whisper_print_segment_callback;
+                wparams.new_segment_callback_user_data = &user_data;
+            }
+
+            // example for abort mechanism
+            // in this example, we do not abort the processing, but we could if the flag is set to true
+            // the callback is called before every encoder run - if it returns false, the processing is aborted
+            {
+                static bool is_aborted = false; // NOTE: this should be atomic to avoid data race
+
+                wparams.encoder_begin_callback = [](struct whisper_context * /*ctx*/, struct whisper_state * /*state*/, void *user_data)
+                {
+                    bool is_aborted = *(bool *)user_data;
+                    return !is_aborted;
+                };
+                wparams.encoder_begin_callback_user_data = &is_aborted;
+            }
+
+            if (whisper_full_parallel(ctx, wparams, pcmf32.data(), pcmf32.size(), params.n_processors) != 0)
+            {
+                fprintf(stderr, "failed to process audio\n");
+                return 10;
+            }
         }
     }
 
@@ -427,7 +458,21 @@ Napi::Value whisper(const Napi::CallbackInfo &info)
 
     std::string language = whisper_params.Get("language").As<Napi::String>();
     std::string model = whisper_params.Get("model").As<Napi::String>();
-    std::string input = whisper_params.Get("fname_inp").As<Napi::String>();
+    // std::string input = whisper_params.Get("fname_inp").As<Napi::String>();
+
+    Napi::Value fname_inp = whisper_params.Get("fname_inp");
+
+    std::string input;
+    if (fname_inp.IsString())
+    {
+        input = fname_inp.As<Napi::String>();
+    }
+    else
+    {
+        // Handle the case where fname_inp is undefined or not a string
+        input = ""; // or any default value or error handling logic
+    }
+
     bool use_gpu = whisper_params.Get("use_gpu").As<Napi::Boolean>();
     bool flash_attn = whisper_params.Get("flash_attn").As<Napi::Boolean>();
     bool no_prints = whisper_params.Get("no_prints").As<Napi::Boolean>();
@@ -438,14 +483,27 @@ Napi::Value whisper(const Napi::CallbackInfo &info)
     bool comma_in_time = whisper_params.Get("comma_in_time").As<Napi::Boolean>();
 
     std::string dll_location = whisper_params.Get("dll_location").As<Napi::String>();
-    Napi::ArrayBuffer arrayBuffer = whisper_params.Get("array_buffer").As<Napi::ArrayBuffer>();
+    Napi::Value arrBuffValue = whisper_params.Get("array_buffer");
 
-    Napi::Value pcmf32Value = whisper_params.Get("pcmf32");
-    std::vector<float> pcmf32_vec;
+    Napi::ArrayBuffer arrayBuffer;
+
+    if (arrBuffValue.IsArrayBuffer())
+    {
+        arrayBuffer = arrBuffValue.As<Napi::ArrayBuffer>();
+    }
+    else
+    {
+        // Handle the case where arrayBuffer is undefined or not an ArrayBuffer
+        // or any default value or error handling logic
+        arrayBuffer = Napi::ArrayBuffer::New(env, 0);
+    }
 
     std::int32_t n_threads = whisper_params.Get("n_threads").As<Napi::Number>();
 
     std::vector<uint8_t> buffer(static_cast<uint8_t *>(arrayBuffer.Data()), static_cast<uint8_t *>(arrayBuffer.Data()) + arrayBuffer.ByteLength());
+
+    Napi::Value pcmf32Value = whisper_params.Get("pcmf32");
+    std::vector<float> pcmf32_vec;
 
     if (pcmf32Value.IsTypedArray())
     {
@@ -460,7 +518,10 @@ Napi::Value whisper(const Napi::CallbackInfo &info)
 
     params.language = language;
     params.model = model;
-    params.fname_inp.emplace_back(input);
+    if (input != "")
+    {
+        params.fname_inp.emplace_back(input);
+    }
     params.use_gpu = use_gpu;
     params.flash_attn = flash_attn;
     params.no_prints = no_prints;

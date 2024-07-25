@@ -1,1 +1,2 @@
 dll_location: D:\dev\whisper.cpp\build\bin\Release\whisper.dll
+info: using audio vector buffer as input
