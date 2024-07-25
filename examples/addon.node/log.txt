@@ -1,0 +1,1 @@
+dll_location: D:\dev\whisper.cpp\build\bin\Release\whisper.dll
